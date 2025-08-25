@@ -5,7 +5,7 @@ import archiver from 'archiver';
 import { execSync } from 'child_process';
 
 type Config = {
-  // Base (riusabile per altri progetti)
+  // Base (reusable for other projects)
   basePluginSlug: string;        // es: "companyoffer-app"
   basePluginName: string;        // es: "CompanyOffer App"
   description: string;
@@ -19,15 +19,15 @@ type Config = {
   ngProjectName: string;                            // es: "companyoffer-app"
   distBrowserPath: string;                          // es: ./dist/companyoffer-app/browser
   srcEnvDir: string;                                // es: ./src/environments
-  runNgBuild: boolean;                              // true per far lanciare a lui ng build
+  runNgBuild: boolean;                              // True to make the ng Build launch to him
   commonNgBuildArgs?: string[];                     // es: ["--base-href","./"]
 
   // Generazione ambienti
   environments: Array<{
     key: 'prod' | 'stage' | 'dev';
-    label: 'PROD' | 'STAGE' | 'DEV';               // per il nome plugin
+    label: 'PROD' | 'STAGE' | 'DEV';               // For the name Plugin
     configuration: 'production' | 'development';   // Angular CLI configuration
-    // Se esiste environment.<fileKey>.ts verrà modificato lì; altrimenti environment.ts
+    // If there is Environment. <FileKey> .ts will be modified there; Otherwise Environment.ts
     fileKey?: 'prod' | 'stage' | 'dev' | '';       // '' = environment.ts
   }>;
 
@@ -314,10 +314,8 @@ async function main() {
       if (config.runNgBuild) {
         const commonArgs = config.commonNgBuildArgs?.join(' ') ?? '';
         const cmd = `npx ng build ${config.ngProjectName} --configuration ${env.configuration} ${commonArgs}`;
-        console.log('  • Eseguo:', cmd);
-        console.log('XX')
+        console.log('  • execute:', cmd);
         execSync(cmd, { stdio: 'inherit' });
-        console.log('YY')
       } else {
         console.log('  • Salto ng build (runNgBuild=false), userò la dist esistente.');
       }

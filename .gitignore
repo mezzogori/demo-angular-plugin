@@ -43,3 +43,10 @@ Thumbs.db
 /wp-plugin-build/demo-plugin-wp-dev/public/
 /wp-plugin-build/demo-plugin-wp-prod/public/
 /wp-plugin-build/demo-plugin-wp-stage/public/
+/wp-plugin-build/demo-plugin-wp-dev/
+/wp-plugin-build/demo-plugin-wp-prod/
+/wp-plugin-build/demo-plugin-wp-stage/
+/wp-plugin-build/demo-plugin-wp-dev-1.1.0.zip
+/wp-plugin-build/demo-plugin-wp-prod-1.1.0.zip
+/wp-plugin-build/demo-plugin-wp-stage-1.1.0.zip
+/wp-plugin-build/
