@@ -40,3 +40,6 @@ testem.log
 # System files
 .DS_Store
 Thumbs.db
+/wp-plugin-build/demo-plugin-wp-dev/public/
+/wp-plugin-build/demo-plugin-wp-prod/public/
+/wp-plugin-build/demo-plugin-wp-stage/public/
