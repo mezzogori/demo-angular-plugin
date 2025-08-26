@@ -138,6 +138,62 @@ async function parseCurrentAmbient(): Promise<string | null> {
   }
 }
 
+async function ensureIframeAutoResizeSnippet(indexHtmlPath: string, slugForDebug: string) {
+  try {
+    let html = await fs.readFile(indexHtmlPath, 'utf8');
+    if (html.includes('WP_IFRAME_AUTOSIZE_SNIPPET')) return;
+
+    const snippet = `
+<!-- WP_IFRAME_AUTOSIZE_SNIPPET -->
+<script>
+(function(){
+  try{
+    if (window.top === window) return; // esci se aperto full-page
+    var SLUG = ${JSON.stringify(slugForDebug)};
+    function postHeight() {
+      var docEl = document.documentElement;
+      var body = document.body || {};
+      var h = Math.max(
+        docEl.scrollHeight || 0,
+        docEl.offsetHeight || 0,
+        body.scrollHeight || 0,
+        body.offsetHeight || 0
+      );
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage({
+          type: 'WP_IFRAME_SIZE',
+          slug: SLUG,
+          instance: window.name || '',
+          height: h
+        }, '*');
+      }
+    }
+    if ('ResizeObserver' in window) {
+      var ro = new ResizeObserver(function(){ postHeight(); });
+      ro.observe(document.documentElement);
+      if (document.body) ro.observe(document.body);
+    }
+    var mo = new MutationObserver(function(){ postHeight(); });
+    mo.observe(document.documentElement, { childList: true, subtree: true, attributes: true });
+    window.addEventListener('load', function(){ setTimeout(postHeight, 0); }, { passive: true });
+    document.addEventListener('DOMContentLoaded', function(){ setTimeout(postHeight, 0); }, { passive: true });
+    window.addEventListener('hashchange', function(){ setTimeout(postHeight, 0); }, { passive: true });
+    setInterval(postHeight, 1200);  // fallback periodico
+    postHeight();
+  }catch(e){}
+})();
+</script>`;
+    if (html.match(/<\/body>/i)) {
+      html = html.replace(/<\/body>/i, `${snippet}\n</body>`);
+    } else {
+      html += snippet;
+    }
+    await fs.writeFile(indexHtmlPath, html, 'utf8');
+  } catch (e) {
+    console.warn('[auto-resize] impossibile iniettare snippet in', indexHtmlPath, e);
+  }
+}
+
 function withEnvSuffix<T extends string>(base: T, env: 'prod'|'stage'|'dev') {
   return `${base}-${env}` as T;
 }
@@ -170,8 +226,8 @@ function phpTemplate(params: {
   pluginUri?: string;
   description: string;
   constPrefix: string; // es: COMPANYOFFER_APP_STAGE
-  funcPrefix: string;  // es: companyoffer_app_stage
-  handlePref: string;  // es: companyoffer-app-stage
+  funcPrefix: string; // es: companyoffer_app_stage
+  handlePref: string; // es: companyoffer-app-stage
 }) {
   const c = params;
   return `<?php
@@ -202,7 +258,6 @@ function ${c.funcPrefix}_glob_first($pattern) {
     return array_pop($matches);
 }
 
-// aggiunge defer a TUTTI gli handle che iniziano con "${c.handlePref}-"
 add_filter('script_loader_tag', function($tag, $handle) {
     if (strpos($handle, '${c.handlePref}-') === 0) {
         $tag = str_replace(' src', ' defer src', $tag);
@@ -210,13 +265,8 @@ add_filter('script_loader_tag', function($tag, $handle) {
     return $tag;
 }, 10, 2);
 
-function ${c.funcPrefix}_render_shortcode($atts = []) {
-    $atts = shortcode_atts([
-        'id'    => '${c.pluginSlug}-root',
-        'class' => '${c.pluginSlug}',
-        'tag'   => 'app-root',
-    ], $atts, ${c.constPrefix}_SHORTCODE);
-
+/* ========= Modalità INLINE (non isolata) ========= */
+function ${c.funcPrefix}_render_inline($atts) {
     $runtime   = ${c.funcPrefix}_glob_first(${c.constPrefix}_PUBLIC_DIR . 'runtime*.js');
     $polyfills = ${c.funcPrefix}_glob_first(${c.constPrefix}_PUBLIC_DIR . 'polyfills*.js');
     $main      = ${c.funcPrefix}_glob_first(${c.constPrefix}_PUBLIC_DIR . 'main*.js');
@@ -264,11 +314,82 @@ function ${c.funcPrefix}_render_shortcode($atts = []) {
     $class = esc_attr($atts['class']);
     return "<{$tag} id=\\"{$id}\\" class=\\"{$class}\\"></{$tag}>";
 }
+
+/* ========= Modalità IFRAME (isolata + auto-resize) ========= */
+function ${c.funcPrefix}_render_iframe($atts) {
+    $indexPath = ${c.constPrefix}_PUBLIC_DIR . 'index.html';
+    if (!file_exists($indexPath)) {
+        return '<div class="notice notice-error">File <code>index.html</code> non trovato in <code>public/</code>.</div>';
+    }
+    $ver = @filemtime($indexPath) ?: ${c.constPrefix}_VERSION;
+    $src = ${c.constPrefix}_PUBLIC_URL . 'index.html?v=' . $ver;
+
+    $id      = esc_attr($atts['id']);
+    $class   = esc_attr($atts['class']);
+    $width   = esc_attr($atts['width']);
+    $height  = esc_attr($atts['height']);
+    $sandbox = 'allow-scripts allow-same-origin';
+    $loading = 'lazy';
+
+    // Identificatore univoco di istanza per il canale postMessage
+    $instance = preg_replace('/[^a-zA-Z0-9\\-_]/','', uniqid(${c.constPrefix}_SLUG . '-', true));
+    $frame_id = $id . '-frame-' . $instance;
+
+    $iframe = '<iframe'
+         . ' id="' . esc_attr($frame_id) . '"'
+         . ' name="' . esc_attr($instance) . '"'
+         . ' class="' . $class . ' ' . '${c.pluginSlug}-frame"'
+         . ' src="' . esc_url($src) . '"'
+         . ' width="' . $width . '"'
+         . ' height="' . $height . '"'
+         . ' style="border:0;display:block;width:' . $width . ';height:' . $height . ';"'
+         . ' loading="' . $loading . '"'
+         . ' sandbox="' . $sandbox . '"'
+         . '></iframe>';
+
+    // Listener per messaggi di resize (solo per questa istanza)
+    $script = '<script>(function(){'
+        . 'var frameId=' . json_encode($frame_id) . ';'
+        . 'var instance=' . json_encode($instance) . ';'
+        . 'function setH(px){var f=document.getElementById(frameId);if(!f)return;var n=parseInt(px,10);if(n>0){f.style.height=n+\"px\";}}'
+        . 'window.addEventListener(\"message\",function(e){try{var d=e.data||{};if(d.type!==\"WP_IFRAME_SIZE\")return;if(d.instance!==instance)return;setH(d.height);}catch(_){}});'
+        . '})();</script>';
+
+    return $iframe . $script;
+}
+
+// Shortcode con selezione modalità (default: iframe)
+function ${c.funcPrefix}_render_shortcode($atts = []) {
+    $atts = shortcode_atts([
+        'mode'  => 'iframe',         // 'iframe' | 'inline'
+        'id'    => '${c.pluginSlug}-root',
+        'class' => '${c.pluginSlug}',
+        'tag'   => 'app-root',       // usato solo in inline
+        'width' => '100%',           // usato in iframe
+        'height'=> '800',            // usato in iframe (px)
+    ], $atts, ${c.constPrefix}_SHORTCODE);
+
+    if ($atts['mode'] === 'inline') {
+        return ${c.funcPrefix}_render_inline($atts);
+    }
+    return ${c.funcPrefix}_render_iframe($atts);
+}
+
 add_shortcode(${c.constPrefix}_SHORTCODE, '${c.funcPrefix}_render_shortcode');
 `;
 }
 
-function readmeTemplate({ pluginName, version, author, shortcode }: { pluginName: string, version: string, author: string, shortcode: string }) {
+function readmeTemplate({
+                          pluginName,
+                          version,
+                          author,
+                          shortcode,
+                        }: {
+  pluginName: string;
+  version: string;
+  author: string;
+  shortcode: string;
+}) {
   return `=== ${pluginName} ===
 Contributors: ${author}
 Tags: angular, spa
@@ -326,7 +447,8 @@ async function main() {
     // Identificatori per ambiente
     const ids = makeIdentifiers(config.basePluginSlug, env.key, config.uniquePerEnvIdentifiers);
     const pluginName = pluginNameWithLabel(config.basePluginName, env.label);
-    const textDomain = (config.textDomain ?? config.basePluginSlug) + (config.uniquePerEnvIdentifiers ? `-${env.key}` : '');
+    const textDomain =
+            (config.textDomain ?? config.basePluginSlug) + (config.uniquePerEnvIdentifiers ? `-${env.key}` : '');
 
     const pluginDir = path.join(config.outDir, ids.slug);
     const publicDir = path.join(pluginDir, 'public');
@@ -338,6 +460,7 @@ async function main() {
     // Copia la build Angular attuale
     console.log('  • Copio build:', config.distBrowserPath, '→', publicDir);
     await copyDir(config.distBrowserPath, publicDir);
+    await ensureIframeAutoResizeSnippet(path.join(publicDir, 'index.html'), ids.slug);
 
     // Scrivi file PHP/readme/uninstall
     const php = phpTemplate({
@@ -355,7 +478,11 @@ async function main() {
                               handlePref: ids.handlePref,
                             });
     await fs.writeFile(path.join(pluginDir, `${ids.slug}.php`), php, 'utf8');
-    await fs.writeFile(path.join(pluginDir, 'readme.txt'), readmeTemplate({ pluginName, version: config.version, author: config.author, shortcode: ids.shortcode }), 'utf8');
+    await fs.writeFile(
+      path.join(pluginDir, 'readme.txt'),
+      readmeTemplate({ pluginName, version: config.version, author: config.author, shortcode: ids.shortcode }),
+      'utf8'
+    );
     await fs.writeFile(path.join(pluginDir, 'uninstall.php'), uninstallTemplate(), 'utf8');
 
     // Crea ZIP
