@@ -26,7 +26,7 @@ type Config = {
   environments: Array<{
     key: 'prod' | 'stage' | 'dev';
     label: 'PROD' | 'STAGE' | 'DEV';               // For the name Plugin
-    configuration: 'production' | 'development';   // Angular CLI configuration
+    configuration: 'production' | 'staging' | 'development';   // Angular CLI configuration
     // If there is Environment. <FileKey> .ts will be modified there; Otherwise Environment.ts
     fileKey?: 'prod' | 'stage' | 'dev' | '';       // '' = environment.ts
   }>;
@@ -56,7 +56,7 @@ const config: Config = {
 
   environments: [
     { key: 'prod',  label: 'PROD',  configuration: 'production',  fileKey: 'prod'  },
-    { key: 'stage', label: 'STAGE', configuration: 'production',  fileKey: 'stage' },
+    { key: 'stage', label: 'STAGE', configuration: 'staging',  fileKey: 'stage' },
     { key: 'dev',   label: 'DEV',   configuration: 'development', fileKey: 'dev'      },
   ],
 
